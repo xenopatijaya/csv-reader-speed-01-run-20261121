@@ -9,25 +9,29 @@ An entry for the [make.fun bounty "Read broken CSV files faster, 21 November 202
 `solve.js` answers exactly as make.fun's own `csv-reader 1.0.0` does on every
 case — same `{columns, rows, errors}`, same broken-row policy (BOM, stray CR,
 unterminated quotes, quote junk, short/long rows, multi-line quoted fields,
-CRLF/LF) — but reads the text with native jumps instead of one character at
-a time:
+CRLF/LF). Round 2 removes the driver's own overhead: instead of paying for a
+full `JSON.parse` of the input and a `JSON.stringify` of the answers, the
+entry transcodes bytes.
 
-- A record whose whole line holds no quote and no stray CR is parsed in one
-  go: slice the line, split on commas, apply the width rule.
-- An unquoted field is one regex jump to the next comma, CR or LF (a stray
-  CR restarts the same field, exactly as the reference does).
-- A quoted field jumps from quote to quote with `indexOf`; doubled quotes
-  are collected as segments and joined once; line breaks inside quotes are
-  converted to LF and counted in one split/join pass.
+- `main.ts` is a mini JSON scanner: it walks `/input/cases.json` just far
+  enough to locate each case's `text` span and `header` flag — the document
+  is never parsed into objects.
+- `solve.js` keeps the verified `run()` parser from round 1 (whole-line fast
+  path, one regex jump per unquoted field, `indexOf` quote-to-quote for
+  quoted fields) and adds `transcode()`, which writes the answer's JSON
+  directly off the still-escaped input bytes: field contents are copied raw,
+  and only the spots where escaping changes the bytes — doubled quotes,
+  in-quote CR/CRLF becoming LF, stray-CR drops — are rebuilt. The reference
+  semantics are mirrored step for step, errors included.
 - Line numbers are kept exactly as the reference keeps them: every LF, CRLF
   and lone CR inside quotes counts one line; a stray CR outside quotes
   counts none; every error carries the line its record starts on.
 
-`main.ts` is the house baseline's driver, unchanged: it reads every case
-from `/input/cases.json`, answers each with `run`, and writes
-`/output/answers.json`. Dependency-free, ES module, Node 22.
+Dependency-free, ES module, Node 22.
 
-Verified locally against the kit's practice set (6/6 identical to the
-reference) and 5,000 randomized broken-CSV fuzz cases (5,000/5,000
-identical), at roughly 3× the speed of the house baseline on the practice
-set.
+Verified locally: the kit's practice set is byte-identical to the stock
+driver's output (grade-local passed, 6/6 cases, L1 regrade byte for byte),
+and a three-way fuzz (reference vs `run()` vs `transcode()`) over 80,000+
+adversarial cases — including `\uXXXX`-encoded structural characters — came
+out identical on every case. End-to-end on the practice set the pipeline
+runs at roughly half the previous entry's CPU time.
